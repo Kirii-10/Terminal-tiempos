@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terminal</title>
+<style>
+:root{--bg:#0a0e12;--card:#10161c;--line:#1b252e;--tx:#cfe9e6;--dim:#5d7a7a;--ac:#9fe8e0;--warn:#e8907f}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:560px;background:var(--bg);color:var(--tx);font-family:ui-monospace,Menlo,Consolas,monospace;padding:16px 16px 110px}
+#ar{text-align:center;color:var(--dim);font-size:13px;margin-top:24px}
+#tm{text-align:center;font-size:56px;font-weight:300;letter-spacing:2px;color:var(--ac);text-shadow:0 0 24px rgba(159,232,224,.35);margin:6px 0 10px;transition:opacity .5s}
+#tm.idle{opacity:.3}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:14px}
+h2{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin:0 0 8px;font-weight:400}
+.dim{color:var(--dim);font-size:13px}
+.t{display:flex;gap:10px;padding:6px 0;font-size:14px}
+.t b{color:var(--dim);font-weight:400;width:22px}
+.t span{flex:1}
+.t em{font-style:normal;color:var(--dim);font-size:12px}
+.t.o span,.t.o em{color:var(--warn)}
+.a{font-size:13px;margin:10px 0}
+.a em{float:right;font-style:normal;color:var(--dim)}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;width:0;background:var(--ac);transition:width .7s ease}
+#log{margin-top:16px;font-size:13px;color:var(--dim);min-height:70px}
+.l.b{color:var(--warn)}
+.l:last-child{color:var(--ac);animation:in .3s ease}
+@keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.bot{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(transparent,var(--bg) 35%);padding:24px 16px calc(14px + env(safe-area-inset-bottom))}
+.bot div{max-width:560px;margin:auto;display:flex;gap:10px;align-items:center;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:12px 14px;transition:.3s}
+.bot div:focus-within{border-color:var(--ac);box-shadow:0 0 18px rgba(159,232,224,.12)}
+.bot span{color:var(--ac)}
+input{flex:1;background:none;border:0;outline:0;color:var(--tx);font:inherit;font-size:16px}
+</style>
+</head>
+<body>
+<div id="ar"></div>
+<div id="tm" class="idle">00:00:00</div>
+<div class="card"><h2>Tareas</h2><div id="tar"></div></div>
+<div class="card"><h2>Hoy por área</h2><div id="are"></div></div>
+<div id="log"></div>
+<div class="bot"><div><span>&gt;</span>
+<input id="in" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="escribe un comando">
+</div></div>
+
+<script>
+const KEY='tt_v1';
+let S={ses:[],tar:[],act:null,id:1};
+try{S=JSON.parse(localStorage.getItem(KEY))||S}catch(e){}
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+const $=id=>document.getElementById(id);
+const norm=s=>s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+const pad=n=>String(n).padStart(2,'0');
+const iso=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+const hms=ms=>{const s=Math.floor(ms/1000);return pad(Math.floor(s/3600))+':'+pad(Math.floor(s%3600/60))+':'+pad(s%60)};
+const hm=ms=>{const m=Math.round(ms/60000);return Math.floor(m/60)+'h '+pad(m%60)+'m'};
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function fecha(t){
+  t=norm(t.slice(1));
+  const d=new Date();d.setHours(0,0,0,0);
+  if(t==='hoy')return iso(d);
+  if(t==='manana'){d.setDate(d.getDate()+1);return iso(d)}
+  const dias=['domingo','lunes','martes','miercoles','jueves','viernes','sabado'];
+  const i=dias.indexOf(t);
+  if(i>=0){const n=(i-d.getDay()+7)%7||7;d.setDate(d.getDate()+n);return iso(d)}
+  const m=t.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if(m){const y=d.getFullYear();let f=new Date(y,m[2]-1,m[1]);if(f<d)f=new Date(y+1,m[2]-1,m[1]);return iso(f)}
+  return null;
+}
+function lab(f){
+  if(!f)return '';
+  const h=new Date(),m=new Date();m.setDate(m.getDate()+1);
+  if(f===iso(h))return 'hoy';
+  if(f===iso(m))return 'mañana';
+  return f.slice(8)+'/'+f.slice(5,7);
+}
+function porArea(){
+  const hoy=iso(new Date()),o={};
+  S.ses.forEach(s=>{if(iso(new Date(s.ini))===hoy)o[s.area]=(o[s.area]||0)+s.fin-s.ini});
+  if(S.act&&iso(new Date(S.act.ini))===hoy)o[S.act.area]=(o[S.act.area]||0)+Date.now()-S.act.ini;
+  return o;
+}
+
+let L=[];
+function renderLog(){$('log').innerHTML=L.map(x=>'<div class="l'+(x.bad?' b':'')+'">'+esc(x.t)+'</div>').join('')}
+function say(t,bad){L.push({t,bad});L=L.slice(-4);renderLog()}
+
+function run(line){
+  const p=line.trim().split(/\s+/);
+  const c=norm(p.shift()||'');
+  const r=p.join(' ');
+  if(!c)return;
+  say('> '+line);
+  if(c==='inicio'){
+    if(!r)return say('Falta el área. Ej: inicio mates',1);
+    if(S.act)return say('Ya hay una sesión en "'+S.act.area+'". Usa fin.',1);
+    S.act={area:r.toLowerCase(),ini:Date.now()};
+    say('Sesión iniciada: '+S.act.area);
+  }else if(c==='fin'){
+    if(!S.act)return say('No hay sesión activa.',1);
+    const s={area:S.act.area,ini:S.act.ini,fin:Date.now()};
+    S.ses.push(s);S.act=null;
+    say('Guardado: '+s.area+' · '+hm(s.fin-s.ini));
+  }else if(c==='tarea'){
+    const tk=p.find(x=>x[0]==='@');let f=null;
+    if(tk){f=fecha(tk);if(!f)return say('Fecha no válida. Usa @hoy, @mañana, @viernes o @25/11',1)}
+    const t=p.filter(x=>x!==tk).join(' ');
+    if(!t)return say('Falta el título.',1);
+    S.tar.push({id:S.id++,t,f,h:0});
+    say('Tarea #'+(S.id-1)+' creada');
+  }else if(c==='hecho'||c==='borrar'){
+    const t=S.tar.find(x=>x.id==r);
+    if(!t)return say('No existe la tarea '+r,1);
+    if(c==='hecho'){t.h=1;say('Completada: '+t.t)}
+    else{S.tar=S.tar.filter(x=>x!==t);say('Borrada: '+t.t)}
+  }else if(c==='hoy'){
+    const sum=Object.values(porArea()).reduce((a,b)=>a+b,0);
+    say('Hoy: '+hm(sum)+' registrados · '+S.tar.filter(x=>!x.h).length+' tareas pendientes');
+  }else if(c==='ayuda'){
+    say('inicio <área> · fin · tarea <texto> @fecha · hecho <n> · borrar <n> · hoy');
+  }else say('Comando desconocido. Escribe ayuda.',1);
+}
+
+function render(){
+  const hoy=iso(new Date());
+  const pend=S.tar.filter(x=>!x.h).sort((a,b)=>(a.f||'9').localeCompare(b.f||'9'));
+  $('tar').innerHTML=pend.length?pend.map(x=>'<div class="t'+(x.f&&x.f<hoy?' o':'')+'"><b>'+x.id+'</b><span>'+esc(x.t)+'</span><em>'+lab(x.f)+'</em></div>').join(''):'<div class="dim">Sin tareas pendientes</div>';
+  const o=porArea(),k=Object.keys(o).sort((a,b)=>o[b]-o[a]),mx=Math.max(1,...k.map(x=>o[x]));
+  $('are').innerHTML=k.length?k.map(a=>'<div class="a"><span>'+esc(a)+'</span><em>'+hm(o[a])+'</em><div class="bar"><i data-w="'+Math.round(o[a]/mx*100)+'"></i></div></div>').join(''):'<div class="dim">Sin sesiones hoy</div>';
+  setTimeout(()=>document.querySelectorAll('.bar i').forEach(i=>i.style.width=i.dataset.w+'%'),30);
+}
+function tick(){
+  const a=S.act;
+  $('tm').textContent=hms(a?Date.now()-a.ini:0);
+  $('tm').className=a?'':'idle';
+  $('ar').textContent=a?a.area:'sin sesión activa';
+}
+
+$('in').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){run(e.target.value);e.target.value='';save();render();tick()}
+});
+setInterval(tick,1000);
+render();tick();
+say('Escribe ayuda para ver los comandos');
+</script>
+</body>
+</html>
