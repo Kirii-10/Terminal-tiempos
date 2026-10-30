@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Terminal</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0a0e12">
 <style>
 :root{--bg:#0a0e12;--card:#10161c;--line:#1b252e;--tx:#cfe9e6;--dim:#5d7a7a;--ac:#9fe8e0;--warn:#e8907f}
 *{box-sizing:border-box}
@@ -144,6 +146,7 @@ $('in').addEventListener('keydown',e=>{
 setInterval(tick,1000);
 render();tick();
 say('Escribe ayuda para ver los comandos');
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');
 </script>
 </body>
 </html>
